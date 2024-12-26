@@ -1,0 +1,8 @@
+[package]
+name = "http-example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8.0-rc.1"
+tokio = { version = "1.42.0", features = ["full"] }
