@@ -71,9 +71,10 @@ checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
 
 [[package]]
 name = "cargo-cloudrun"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "clap",
+ "clap-cargo",
  "dialoguer",
  "google-cloudevents",
  "serde",
@@ -94,6 +95,16 @@ checksum = "3135e7ec2ef7b10c6ed8950f0f792ed96ee093fa088608f1c76e569722700c84"
 dependencies = [
  "clap_builder",
  "clap_derive",
+]
+
+[[package]]
+name = "clap-cargo"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b2ea69cefa96b848b73ad516ad1d59a195cdf9263087d977f648a818c8b43e"
+dependencies = [
+ "anstyle",
+ "clap",
 ]
 
 [[package]]
@@ -188,9 +199,9 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "google-cloudevents"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86ea3cc472233151c68cc93dd0d7ec38850d4eb1049c81638e1ca029ebcb0727"
+checksum = "983b0ef0865d9c48098c570505d35461135a09d92f7c1ff8db75c0364a7226df"
 dependencies = [
  "prost",
  "prost-types",

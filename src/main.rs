@@ -4,20 +4,27 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::{env, fs};
 mod init;
-#[derive(Parser, Debug)]
-#[command(
-    name = "cargo-cloudrun",
-    about = "A custom cargo subcommand to manage Google Cloud Run deployments."
-)]
+#[derive(Parser)] // requires `derive` feature
+#[command(name = "cargo")]
+#[command(bin_name = "cargo")]
+#[command(styles = CLAP_STYLING)]
+enum CargoCli {
+    #[command(name = "cloudrun")]
+    CloudRun(Cli),
+}
+
+#[derive(Args, Debug)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
+// about = "A custom cargo subcommand to manage Google Cloud Run deployments."
 #[derive(Subcommand, Debug)]
 enum Commands {
     Deploy(DeployArgs),
-    Init(InitArgs),
+    Init, // No additional args needed for Init
+    New(NewArgs), // Assuming NewArgs might differ from InitArgs
 }
 
 #[derive(Args, Debug)]
@@ -27,35 +34,72 @@ struct DeployArgs {
     extra_args: Vec<String>,
 }
 #[derive(Args, Debug)]
-struct InitArgs {
-    /// The name of the package to create (if not already in a package)
+struct NewArgs {
+    /// The name of the package to create
     package_name: String,
 
     /// If set, create an HTTP handler (default = true).
-    /// This conflicts with --event and --event-type.
     #[arg(long, default_value = "true", conflicts_with_all = &["event", "event_type"])]
     http: bool,
 
     /// If set, create an event-based handler.
-    /// Conflicts with --http and --event-type.
     #[arg(long, conflicts_with_all = &["http"])]
     event: bool,
 
     /// Specify the event type for the event-based handler.
-    /// Conflicts with --http and --event.
     #[arg(long, conflicts_with_all = &["http"])]
     event_type: Option<String>,
 }
 
-fn main() {
-    let cli = Cli::parse();
+pub const CLAP_STYLING: clap::builder::styling::Styles = clap::builder::styling::Styles::styled()
+    .header(clap_cargo::style::HEADER)
+    .usage(clap_cargo::style::USAGE)
+    .literal(clap_cargo::style::LITERAL)
+    .placeholder(clap_cargo::style::PLACEHOLDER)
+    .error(clap_cargo::style::ERROR)
+    .valid(clap_cargo::style::VALID)
+    .invalid(clap_cargo::style::INVALID);
 
-    match &cli.command {
-        Commands::Deploy(deploy_args) => deploy(deploy_args),
-        Commands::Init(init_args) => {
-            if let Err(err) = init::handle_init(init_args) {
-                eprintln!("Failed to init new project: {err}");
-                exit(1);
+fn main() {
+    let cli = CargoCli::parse();
+
+    match &cli {
+        CargoCli::CloudRun(cli) => {
+            match &cli.command {
+                Commands::Deploy(deploy_args) => deploy(deploy_args),
+
+                Commands::New(new_args) => {
+                    if let Err(err) = init::handle_new(new_args) {
+                        eprintln!("Failed to create new project: {err}");
+                        exit(1);
+                    }
+                },
+
+                Commands::Init => {
+                    // Get the current directory name to use as the package name
+                    let current_dir = match env::current_dir() {
+                        Ok(dir) => dir,
+                        Err(err) => {
+                            eprintln!("Failed to get current directory: {err}");
+                            exit(1);
+                        }
+                    };
+                    let package_name = "".to_string();
+
+                    // Create NewArgs with the current directory's name
+                    let new_args = NewArgs {
+                        package_name,
+                        http: true, // Set default values or derive from InitArgs if needed
+                        event: false,
+                        event_type: None,
+                    };
+
+                    // Delegate to handle_new function
+                    if let Err(err) = init::handle_new(&new_args) {
+                        eprintln!("Failed to initialize project in current directory: {err}");
+                        exit(1);
+                    }
+                }
             }
         }
     }
