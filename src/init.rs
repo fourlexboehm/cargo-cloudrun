@@ -6,7 +6,7 @@ use google_cloudevents::ALL_EVENT_PATHS;
 use std::path::Path;
 use crate::{NewArgs};
 
-pub const EVENT_CARGO_TOML: &str = include_str!("../templates/event/NotCargo.toml");
+pub const EVENT_CARGO_TOML: &str = include_str!("event/Cargo.toml");
 pub const EVENT_MAIN_RS: &str = include_str!("../templates/event/src/main.rs");
 pub const HTTP_CARGO_TOML: &str = include_str!("../templates/http/NotCargo.toml");
 pub const HTTP_MAIN_RS: &str = include_str!("../templates/http/src/main.rs");
@@ -108,8 +108,8 @@ fn map_event_type(event_suffix: &str) -> Result<String, Box<dyn Error>> {
     }
 }
 
-/// Writes the embedded NotCargo.toml & main.rs to disk for event packages,
-/// updating the `[package] name` in NotCargo.toml to `package_name` and
+/// Writes the embedded Cargo.toml & main.rs to disk for event packages,
+/// updating the `[package] name` in Cargo.toml to `package_name` and
 /// inserting the selected `event_type` into main.rs.
 fn write_event_files(
     project_dir: &Path,
@@ -118,7 +118,7 @@ fn write_event_files(
     package_name: &str,
     event_type: &str,
 ) -> io::Result<()> {
-    // 1. Write NotCargo.toml
+    // 1. Write Cargo.toml
     let cargo_toml_path = project_dir.join("Cargo.toml");
     let updated_cargo_toml = rewrite_package_name(cargo_toml_str, package_name);
     fs::write(cargo_toml_path, updated_cargo_toml)?;
@@ -132,15 +132,15 @@ fn write_event_files(
     Ok(())
 }
 
-/// Writes the embedded NotCargo.toml & main.rs to disk,
-/// updating the `[package] name` in NotCargo.toml to `package_name`.
+/// Writes the embedded Cargo.toml & main.rs to disk,
+/// updating the `[package] name` in Cargo.toml to `package_name`.
 fn write_files(
     project_dir: &Path,
     cargo_toml_str: &str,
     main_rs_str: &str,
     package_name: &str,
 ) -> io::Result<()> {
-    // 1. Write NotCargo.toml
+    // 1. Write Cargo.toml
     // EVENT_PATHS
 
     let cargo_toml_path = project_dir.join("Cargo.toml");

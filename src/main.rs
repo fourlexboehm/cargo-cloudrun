@@ -3,6 +3,8 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::{env, fs};
+use google_cloudevents::google::events::cloud::firestore::v1::DocumentCreatedEvent;
+
 mod init;
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cargo")]
