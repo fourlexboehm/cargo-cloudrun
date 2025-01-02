@@ -1,12 +1,12 @@
-use std::error::Error;
-use std::{env, fs, io};
-use dialoguer::{Select, Sort};
+use crate::NewArgs;
 use dialoguer::theme::ColorfulTheme;
+use dialoguer::Select;
 use google_cloudevents::ALL_EVENT_PATHS;
+use std::error::Error;
 use std::path::Path;
-use crate::{NewArgs};
+use std::{env, fs, io};
 
-pub const EVENT_CARGO_TOML: &str = include_str!("event/Cargo.toml");
+pub const EVENT_CARGO_TOML: &str = include_str!("../templates/event/Cargo.toml");
 pub const EVENT_MAIN_RS: &str = include_str!("../templates/event/src/main.rs");
 pub const HTTP_CARGO_TOML: &str = include_str!("../templates/http/NotCargo.toml");
 pub const HTTP_MAIN_RS: &str = include_str!("../templates/http/src/main.rs");
@@ -118,17 +118,32 @@ fn write_event_files(
     package_name: &str,
     event_type: &str,
 ) -> io::Result<()> {
-    // 1. Write Cargo.toml
     let cargo_toml_path = project_dir.join("Cargo.toml");
     let updated_cargo_toml = rewrite_package_name(cargo_toml_str, package_name);
     fs::write(cargo_toml_path, updated_cargo_toml)?;
 
-    // 2. Write src/main.rs with the event type
-    let main_rs_path = project_dir.join("src").join("main.rs");
-    let updated_main_rs = main_rs_str.replace("google_cloudevents::google::events::cloud::firestore::v1::DocumentCreatedEvent", event_type)
-        .replace("DocumentCreatedEvent", &*event_type[(event_type.rfind("::").unwrap() + 2)..].to_string());
-    fs::write(main_rs_path, updated_main_rs)?;
+    // Find the position after the last "::"
+    let tail_start = event_type.rfind("::").unwrap() + 2;
 
+    // Extract the substring after "::"
+    let tail_substring = &event_type[tail_start..];
+
+    // TODO: This wont work for all event types, figure out a more robust way, either using reflection or a map
+    // Replace "Event" with "Data" in that tail substring
+    let new_tail = tail_substring.replace("Event", "Data");
+
+    // Build the final string for main.rs
+    let updated_main_rs = main_rs_str
+        .replace(
+            "google_cloudevents::google::events::cloud::pubsub::v1::MessagePublishedData",
+            event_type,
+        )
+        // Now swap out just the tail
+        .replace("MessagePublishedData", &new_tail);
+
+    // Write changes to src/main.rs
+    let main_rs_path = project_dir.join("src").join("main.rs");
+    fs::write(main_rs_path, updated_main_rs)?;
     Ok(())
 }
 

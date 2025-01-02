@@ -2,7 +2,11 @@
 
 **cargo-cloudrun** is a command-line tool for deploying Rust applications to [Google Cloud Run](https://cloud.google.com/run). It wraps the `gcloud` CLI to simplify the deployment process—**no manual Docker builds** or direct interaction with the **Google Cloud Console** required.
 
-Inspired by the ergonomics of [`cargo-lambda`](https://github.com/cargo-lambda/cargo-lambda), **cargo-cloudrun** can be used to create Cloud Run services that handle **HTTP requests** or **event triggers** in a function-like style. It also supports **monolithic** Rust applications.
+Inspired by the ergonomics of [`cargo-lambda`](https://github.com/cargo-lambda/cargo-lambda), **cargo-cloudrun** can be used to create Cloud Run services that handle **HTTP requests** or **event triggers** in a function-like style.
+
+It also supports **monolithic** Rust applications.
+It uses [google-cloudevents](https://github.com/fourlexboehm/google-cloudevents-rs) to handle cloud events from the axum runtime.
+This is nessesary for cloud events but cargo cloudrun can be used with any runtime. as long as it binds to port `8080`.
 
 ## Features
 
@@ -22,5 +26,14 @@ Inspired by the ergonomics of [`cargo-lambda`](https://github.com/cargo-lambda/c
 
 **Install** `cargo-cloudrun`:
 
-   ```bash
-   cargo install cargo-cloudrun
+   ```
+    cargo install cargo-cloudrun
+   ```
+
+## Usage
+    
+```bash
+cargo cloudrun new my-service
+cd my-service
+cargo cloudrun deploy
+```

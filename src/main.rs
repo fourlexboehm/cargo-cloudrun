@@ -1,9 +1,8 @@
 use clap::{Args, Parser, Subcommand};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::{exit, Command};
-use std::{env, fs};
-use google_cloudevents::google::events::cloud::firestore::v1::DocumentCreatedEvent;
+use std::process::{exit, Command, Stdio};
+use std::{env, fs, thread};
 
 mod init;
 #[derive(Parser)] // requires `derive` feature
@@ -78,14 +77,6 @@ fn main() {
                 },
 
                 Commands::Init => {
-                    // Get the current directory name to use as the package name
-                    let current_dir = match env::current_dir() {
-                        Ok(dir) => dir,
-                        Err(err) => {
-                            eprintln!("Failed to get current directory: {err}");
-                            exit(1);
-                        }
-                    };
                     let package_name = "".to_string();
 
                     // Create NewArgs with the current directory's name
@@ -128,30 +119,25 @@ fn deploy(args: &DeployArgs) {
 
     // 3. Build the Dockerfile content, referencing the found package name
     let dockerfile_content = format!(
-        r#"# Use the official Rust image.
+        r#"
 # https://hub.docker.com/_/rust
-FROM rust
-
-# Copy local code to the container image.
-WORKDIR /usr/src/app
-COPY . .
-
-# Install production dependencies and build a release artifact.
+FROM rust:1 as build-env
+WORKDIR /app
+COPY . /app
 RUN cargo build --release
 
-# Service must listen to $PORT environment variable.
-# This default value facilitates local development.
+FROM gcr.io/distroless/cc-debian12
 ENV PORT 8080
-
-# Run the web service on container startup.
-ENTRYPOINT ["target/release/{}"]
+COPY --from=build-env /app/target/release/{} /
+ENTRYPOINT ["/{}"]
 "#,
+        root_package_name,
         root_package_name
     );
 
     // if Rc::new(fs::File("Dockerfile")) {}
     let mut delete_dockerfile = false;
-    if fs::File::open("Dockerfile").is_err() {
+    if File::open("Dockerfile").is_err() {
         // 4. Write the Dockerfile in the crate root
         let dockerfile_path = root_dir.join("Dockerfile");
         if let Err(err) = fs::write(&dockerfile_path, &dockerfile_content) {
@@ -160,16 +146,50 @@ ENTRYPOINT ["target/release/{}"]
         }
         delete_dockerfile = true;
     }
-    let mut cmd_args = vec![
-        String::from("run"),
-        String::from("deploy"),
-        root_package_name.clone(),
-        String::from("--source"),
-        String::from("."),
-    ];
-    cmd_args.extend_from_slice(&args.extra_args); // Append e.g. ["--region", "us-central1"]
 
-    // 5. Run `gcloud run deploy` with the user-provided extra args
+    if !Path::new(".gcloudignore").exists() {
+        if let Err(e) = create_gcloudignore() {
+            eprintln!("Warning: Failed to create .gcloudignore: {}", e);
+        }
+    }
+
+    // let previous_image = Command::new("gcloud")
+    //     .args([
+    //         "run",
+    //         "services",
+    //         "describe",
+    //         &root_package_name,
+    //         "--format=value(image)"
+    //     ])
+    //     .output()
+    //     .ok()
+    //     .and_then(|output| {
+    //         if output.status.success() {
+    //             String::from_utf8_lossy(&output.stdout)
+    //                 .trim()
+    //                 .to_string()
+    //                 .into()
+    //         } else {
+    //             None
+    //         }
+    //     })
+    //     .filter(|s| !s.is_empty())
+    //     .map(|s| format!("--cache-from={}", s))
+    //     .unwrap_or_default();
+
+    let mut cmd_args = vec![
+        "run",
+        "deploy",
+        &*root_package_name,
+        "--source",
+        ".",
+        "--allow-unauthenticated",
+        "--use-http2"
+    ];
+
+    // if !previous_image.is_empty() {
+    //     cmd_args.push(previous_image);
+    // }
     let status = Command::new("gcloud")
         .args(&cmd_args)
         .status()
@@ -252,6 +272,23 @@ fn maybe_delete_dockerfile(delete_dockerfile: &mut bool) {
         let path_b = Path::new(b).components().collect::<Vec<_>>();
         path_a == path_b
     }
+
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
+
+fn create_gcloudignore() -> std::io::Result<()> {
+    let gcloudignore_content = r#"# Rust build artifacts
+/target/
+/debug/
+/target/**/*
+.git
+.gitignore
+.gcloudignore"#;
+
+    let mut file = File::create(".gcloudignore")?;
+    file.write_all(gcloudignore_content.as_bytes())?;
+    Ok(())
+}
 
 
 
