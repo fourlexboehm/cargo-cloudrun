@@ -77,8 +77,16 @@ fn main() {
                 },
 
                 Commands::Init => {
-                    let package_name = "".to_string();
-
+                    let mut package_name = "".to_string();
+                    
+                    // Try to get the current directory name as the package name
+                    if let Ok(current_dir) = env::current_dir() {
+                        if let Some(dir_name) = current_dir.file_name() {
+                            if let Some(name) = dir_name.to_str() {
+                                package_name = name.to_string();
+                            }
+                        }
+                    }
                     // Create NewArgs with the current directory's name
                     let new_args = NewArgs {
                         package_name,
@@ -137,7 +145,7 @@ ENTRYPOINT ["/{}"]
 
     // if Rc::new(fs::File("Dockerfile")) {}
     let mut delete_dockerfile = false;
-    if File::open("Dockerfile").is_err() {
+    if File::open(root_dir.join("Dockerfile")).is_err() {
         // 4. Write the Dockerfile in the crate root
         let dockerfile_path = root_dir.join("Dockerfile");
         if let Err(err) = fs::write(&dockerfile_path, &dockerfile_content) {
@@ -147,9 +155,10 @@ ENTRYPOINT ["/{}"]
         delete_dockerfile = true;
     }
 
-    if !Path::new(".gcloudignore").exists() {
+    if !root_dir.join(".gcloudignore").exists() {
         if let Err(e) = create_gcloudignore() {
-            eprintln!("Warning: Failed to create .gcloudignore: {}", e);
+            let gcloudignore_path = root_dir.join(".gcloudignore");
+            eprintln!("Warning: Failed to create {}: {}", gcloudignore_path.display(), e);
         }
     }
 
@@ -178,18 +187,27 @@ ENTRYPOINT ["/{}"]
     //     .unwrap_or_default();
 
     let mut cmd_args = vec![
-        "run",
-        "deploy",
-        &*root_package_name,
-        "--source",
-        ".",
-        "--allow-unauthenticated",
-        "--use-http2"
+        "run".to_string(),
+        "deploy".to_string(),
+        root_package_name.clone(),
+        "--source".to_string(),
+        ".".to_string(),
+        "--allow-unauthenticated".to_string(),
+        "--use-http2".to_string()
     ];
 
     // if !previous_image.is_empty() {
     //     cmd_args.push(previous_image);
     // }
+    
+    // Add any additional arguments from DeployArgs
+    if !args.extra_args.is_empty() {
+        if !cmd_args.is_empty() {
+            cmd_args.push("--".to_string());
+        }
+        cmd_args.extend(args.extra_args.iter().cloned());
+    }
+    
     let status = Command::new("gcloud")
         .args(&cmd_args)
         .status()
@@ -205,78 +223,121 @@ ENTRYPOINT ["/{}"]
 
 fn maybe_delete_dockerfile(delete_dockerfile: &mut bool) {
     if *delete_dockerfile {
-        fs::remove_file("Dockerfile").unwrap();
+        if let Err(e) = fs::remove_file("Dockerfile") {
+            eprintln!("Warning: Failed to delete temporary Dockerfile: {}", e);
+        }
     }
 }
 
 /// Find the Cargo workspace root and the *root package name* using `cargo metadata`.
     /// Returns a tuple: (workspace_root_path, root_package_name).
     ///
-    /// Assumes there *is* a package in the workspace root (i.e., not just a virtual manifest).
-    fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> {
-        // Run `cargo metadata --format-version=1`
-        let output = Command::new("cargo")
-            .args(["metadata", "--format-version=1"])
-            .output()?;
+/// If the workspace root has a virtual manifest (no package in root), falls back to using
+/// the current package but still deploys from the workspace root to maintain dependencies.
+fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> {
+    // Run `cargo metadata --format-version=1`
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version=1"])
+        .output()?;
 
-        if !output.status.success() {
-            return Err("`cargo metadata` failed".into());
+    if !output.status.success() {
+        return Err("`cargo metadata` failed".into());
+    }
+
+    // Parse JSON
+    let v: Value = serde_json::from_slice(&output.stdout)?;
+
+    // Extract workspace_root
+    let Some(workspace_root_str) = v.get("workspace_root").and_then(Value::as_str) else {
+        return Err("No 'workspace_root' found in cargo metadata".into());
+    };
+    let workspace_root = PathBuf::from(workspace_root_str);
+
+    // Look through the "packages" array
+    let Some(packages) = v.get("packages").and_then(Value::as_array) else {
+        return Err("'packages' not found or is not an array in cargo metadata".into());
+    };
+
+    let manifest_path = workspace_root
+        .join("Cargo.toml")
+        .to_string_lossy()
+        .to_string();
+
+    // First try to find a package at the workspace root
+    for pkg in packages {
+        let pkg_manifest_path = pkg
+            .get("manifest_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        // Compare them in a platform-agnostic way
+        if same_file_path(&pkg_manifest_path, &manifest_path) {
+            // Found the root package
+            let Some(pkg_name) = pkg.get("name").and_then(Value::as_str) else {
+                return Err("Package in root has no 'name' in cargo metadata".into());
+            };
+            return Ok((workspace_root, pkg_name.to_owned()));
         }
+    }
 
-        // Parse JSON
-        let v: Value = serde_json::from_slice(&output.stdout)?;
-
-        // Extract workspace_root
-        let Some(workspace_root_str) = v.get("workspace_root").and_then(Value::as_str) else {
-            return Err("No 'workspace_root' found in cargo metadata".into());
+    // No package at workspace root (virtual manifest) - find the current package instead,
+    // but still return the workspace root as the directory to build from
+    let current_dir = env::current_dir()?;
+    let mut current_package_name = None;
+    
+    // Try to find a package that contains the current directory
+    for pkg in packages {
+        let Some(pkg_manifest_path) = pkg.get("manifest_path").and_then(Value::as_str) else {
+            continue;
         };
-        let workspace_root = PathBuf::from(workspace_root_str);
-
-        // Look through the "packages" array and see which package has
-        // `manifest_path` = workspace_root + "Cargo.toml"
-        let Some(packages) = v.get("packages").and_then(Value::as_array) else {
-            return Err("'packages' not found or is not an array in cargo metadata".into());
-        };
-
-        let manifest_path = workspace_root
-            .join("Cargo.toml")
-            .to_string_lossy()
-            .to_string();
-
-        for pkg in packages {
-            let pkg_manifest_path = pkg
-                .get("manifest_path")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-
-            // Compare them in a platform-agnostic way
-            if same_file_path(&pkg_manifest_path, &manifest_path) {
-                // Found the root package
-                let Some(pkg_name) = pkg.get("name").and_then(Value::as_str) else {
-                    return Err("Package in root has no 'name' in cargo metadata".into());
-                };
-                return Ok((workspace_root, pkg_name.to_owned()));
+        
+        // Get the directory of the package manifest
+        let pkg_dir = Path::new(pkg_manifest_path).parent().unwrap_or(Path::new(""));
+        
+        // Debug info
+        // eprintln!("Checking package at {}: current_dir={}", pkg_dir.display(), current_dir.display());
+        
+        // Check if the current directory starts with this package directory
+        // This is a simplified check - we might need a more robust method
+        if let Ok(rel_path) = current_dir.strip_prefix(pkg_dir) {
+            if !rel_path.as_os_str().is_empty() && rel_path.components().count() > 0 {
+                // We're not in the package directory, skip
+                continue;
             }
-        }
-
-        Err(format!(
-            "Did not find a package with manifest_path = {manifest_path}"
-        ))?
+            
+            let Some(pkg_name) = pkg.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            
+            current_package_name = Some(pkg_name.to_owned());
+            break;
+        };
     }
 
-    /// Compare two file paths in a slightly more robust way.
-    /// (On Windows, e.g., backslash vs forward slash).
-    fn same_file_path(a: &str, b: &str) -> bool {
-        // Convert both to a canonical PathBuf
-        let path_a = Path::new(a).components().collect::<Vec<_>>();
-        let path_b = Path::new(b).components().collect::<Vec<_>>();
-        path_a == path_b
+    if let Some(package_name) = current_package_name {
+        return Ok((workspace_root, package_name));
     }
+
+    Err("Could not find a suitable package to deploy. Neither a root package nor a package at the current directory was found.".into())
+}
+
+/// Compare two file paths in a slightly more robust way.
+/// (On Windows, e.g., backslash vs forward slash).
+fn same_file_path(a: &str, b: &str) -> bool {
+    // Convert both to a canonical PathBuf
+    let path_a = Path::new(a).components().collect::<Vec<_>>();
+    let path_b = Path::new(b).components().collect::<Vec<_>>();
+    path_a == path_b
+}
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 
 fn create_gcloudignore() -> std::io::Result<()> {
+    let root_dir = match find_root_package() {
+        Ok((dir, _)) => dir,
+        Err(_) => PathBuf::from("."), // Fallback to current directory if can't determine workspace root
+    };
     let gcloudignore_content = r#"# Rust build artifacts
 /target/
 /debug/
@@ -285,7 +346,7 @@ fn create_gcloudignore() -> std::io::Result<()> {
 .gitignore
 .gcloudignore"#;
 
-    let mut file = File::create(".gcloudignore")?;
+    let mut file = File::create(root_dir.join(".gcloudignore"))?;
     file.write_all(gcloudignore_content.as_bytes())?;
     Ok(())
 }
